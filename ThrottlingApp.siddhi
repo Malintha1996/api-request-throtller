@@ -1,0 +1,39 @@
+@App:name('API-Request-Throttler')
+@App:description('Enforces throttling on API requests')
+
+-- HTTP endpoint which listens for API request related events
+@source(type = 'http', receiver.url = "http://0.0.0.0:8006/apiRequest", basic.auth.enabled = "false",@map(type = 'json'))
+define stream APIRequestStream (user string, userEmail string);
+
+@sink(type = 'log', @map(type = 'text'))
+define stream ThrottleOutputStream (user string,userEmail string, isThrottled bool);
+
+
+-- Email sink to send alerts
+@sink(type = 'email', username = "malintha1996", address = "malintha1996@gmail.com", password = "123654789m",subject = "Upgrade API Subscription Tier", to = "{{userEmail}}", host = "smtp.gmail.com", port = "465",ssl.enable = "true", auth = "true",@map(type = 'text',@payload(
+"""Hi {{user}}
+Based on our records, it seems you are hitting the upper limit of the API requests in a frequent manner.
+We kindly request you to consider upgrading to next API subscription tier to avoid this in the future.
+Thanks,
+API Team""")))
+define stream UserNotificationStream (user string,userEmail string, 
+throttledCount long);
+
+@info(name = 'Query to find users who need to be throttled')
+from APIRequestStream#window.timeBatch(1 min, 0, true)
+select user,userEmail, count() as totalRequestCount
+group by user
+having totalRequestCount == 10 or totalRequestCount == 0 
+insert all events into ThrottledStream;
+
+@info(name = 'Query to add a flag for throttled request')
+from ThrottledStream select user,userEmail,
+ifThenElse(totalRequestCount == 0, false, true) as isThrottled insert into ThrottleOutputStream;
+
+@info(name = 'Query to find frequently throttled users - who have throttled more than 10 times in the last hour')
+from ThrottleOutputStream[isThrottled]#window.time(1 hour)
+select user,userEmail, count() as throttledCount
+group by user
+having throttledCount > 10
+output first every 15 min
+insert into UserNotificationStream;
