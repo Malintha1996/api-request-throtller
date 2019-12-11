@@ -1,4 +1,4 @@
-@App:name('API-Request-Throttler')
+@App:name('ThrottlingApp')
 @App:description('Enforces throttling on API requests')
 
 -- HTTP endpoint which listens for API request related events
